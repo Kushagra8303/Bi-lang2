@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:test/sharedPrefrenceMethods/SharedPrefrenceMethods.dart';
-import 'package:test/testChatTab.dart';
-
+import '../controller/auth_controller.dart';
+import '../sharedPrefrenceMethods/SharedPrefrenceMethods.dart';
 import '../test/chats_list_tab.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -12,23 +11,54 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen>
-    with SingleTickerProviderStateMixin {
+    with WidgetsBindingObserver, SingleTickerProviderStateMixin {
   final SharedPreferenceMethods _pref = SharedPreferenceMethods();
+  final AuthController authController = AuthController();
   late TabController _controller;
 
   @override
   void initState() {
     super.initState();
     _controller = TabController(length: 3, vsync: this);
+    WidgetsBinding.instance.addObserver(this);
+
+    authController.setUserOnline(); // Home open → mark user online
   }
 
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  // 🔥 App minimize / close handling
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      authController.setUserOnline();
+    } else if (state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.paused ||
+        state == AppLifecycleState.detached) {
+      authController.setUserOffline();
+    }
+  }
+
+  // 🔥 Logout function fully updated
   Future<void> _logout() async {
-    await _pref.logout(context); // ✅ Uses new logout method
-  }
-  void _profile() {
-    Navigator.pushNamed(context, "/profile"); // 🔥 Navigate to ProfileScreen
+    print("🔹 Logout clicked"); // Debug print
+
+    // 1️⃣ Set offline + last seen
+    await authController.setUserOffline();
+
+    // 2️⃣ Firebase sign out + clear prefs + navigate login
+    await authController.logout(context);
+
+    print("🔹 Logout finished"); // Debug print
   }
 
+  void _profile() {
+    Navigator.pushNamed(context, "/profile");
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -50,14 +80,13 @@ class _HomeScreenState extends State<HomeScreen>
               child: CircleAvatar(
                 radius: 25,
                 backgroundColor: Colors.blue,
-                child: Icon(Icons.wechat_outlined, size: 38, color: Colors.white),
+                child: Icon(Icons.wechat_outlined,
+                    size: 38, color: Colors.white),
               ),
             ),
             SizedBox(width: 10),
-            Text(
-              "Bi Chat",
-              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 30),
-            ),
+            Text("Bi Chat",
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 30)),
           ],
         ),
         actions: [
@@ -65,16 +94,13 @@ class _HomeScreenState extends State<HomeScreen>
           const SizedBox(width: 16),
           PopupMenuButton<String>(
             icon: const Icon(Icons.more_vert, size: 26),
-            onSelected: (value) {
-              if (value == "logout") _logout();
+            onSelected: (String value) async {
+              print("Selected menu: $value"); // Debug
+              if (value == "logout") await _logout();
               if (value == "profile") _profile();
-              if (value == "share") {}
-              if (value == "invite") {}
             },
             itemBuilder: (context) => const [
               PopupMenuItem(value: "profile", child: Text("Profile")),
-              PopupMenuItem(value: "share", child: Text("Share App")),
-              PopupMenuItem(value: "invite", child: Text("Invite Friends")),
               PopupMenuItem(value: "logout", child: Text("Logout")),
             ],
           ),

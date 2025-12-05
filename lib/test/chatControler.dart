@@ -6,30 +6,35 @@ class ChatController {
   final FirebaseFirestore firestore = FirebaseFirestore.instance;
   final FirebaseAuth auth = FirebaseAuth.instance;
 
-  String get myUid => auth.currentUser!.uid;
-
-  // 🟢 Chat ID Generator (same for both users)
-  String getChatId(String a, String b) {
-    return a.hashCode <= b.hashCode ? '${a}_$b' : '${b}_$a';
+  String get myUid {
+    print("ccccccc ChatController: Getting myUid");
+    return auth.currentUser!.uid;
   }
 
-  // 🟢 Fetch Messages Stream (FIXED)
+  // 🟢 Chat ID Generator (consistent logic)
+  String getChatId(String a, String b) {
+    String chatId = a.compareTo(b) < 0 ? '${a}_$b' : '${b}_$a';
+    print("ccccccc ChatController: Generated Chat ID => $chatId");
+    return chatId;
+  }
+
+  // 🟢 Fetch Messages Stream
   Stream<QuerySnapshot> getMessages(String otherId) {
     String chatId = getChatId(myUid, otherId);
 
-    print("📌 Fetching messages for ChatID => $chatId");
+    print("ccccccc ChatController: Fetching messages for ChatID => $chatId");
 
     return firestore
         .collection("chats")
         .doc(chatId)
         .collection("messages")
-        .orderBy("timestamp", descending: true)
+        .orderBy("timestamp", descending: true) // descending: true (for ListView reverse: true)
         .snapshots();
   }
 
   // 🟢 Fetch My Chat List
   Stream<QuerySnapshot> getMyChatsStream() {
-    print("📌 Fetching Chat List for User => $myUid");
+    print("ccccccc ChatController: Fetching Chat List for User => $myUid");
 
     return firestore
         .collection("users")
@@ -48,7 +53,7 @@ class ChatController {
     try {
       String chatId = getChatId(me.id!, other.id!);
 
-      print("📩 Sending message to ChatID => $chatId");
+      print("ccccccc ChatController: Sending message to ChatID => $chatId");
 
       // 1️⃣ Save message
       await firestore
@@ -60,9 +65,10 @@ class ChatController {
         "receiverId": other.id,
         "message": message,
         "timestamp": FieldValue.serverTimestamp(),
+        "translatedCache": {},
       });
 
-      print("✅ Message saved successfully");
+      print("ccccccc ChatController: Message saved successfully in chats collection.");
 
       // 2️⃣ Save chat list entries
       await saveChatListForBoth(
@@ -71,10 +77,10 @@ class ChatController {
         lastMessage: message,
       );
 
-      print("✅ Chat list updated for both users");
+      print("ccccccc ChatController: Chat list update completed.");
 
     } catch (e) {
-      print("❌ Cannot send message: $e");
+      print("ccccccc ChatController: ❌ Cannot send message error: $e");
     }
   }
 
@@ -88,9 +94,9 @@ class ChatController {
     String myUid = me.id!;
     String otherUid = other.id!;
 
-    print("📌 Updating chat list => me: $myUid, other: $otherUid");
+    print("ccccccc ChatController: Updating chat list for ME: $myUid, OTHER: $otherUid");
 
-    // My chat entry
+    // My chat entry (for ME)
     await firestore
         .collection("users")
         .doc(myUid)
@@ -105,7 +111,9 @@ class ChatController {
       "timestamp": FieldValue.serverTimestamp(),
     }, SetOptions(merge: true));
 
-    // Other user's chat entry
+    print("ccccccc ChatController: ME's chat list updated.");
+
+    // Other user's chat entry (for OTHER)
     await firestore
         .collection("users")
         .doc(otherUid)
@@ -119,5 +127,7 @@ class ChatController {
       "lastMessage": lastMessage,
       "timestamp": FieldValue.serverTimestamp(),
     }, SetOptions(merge: true));
+
+    print("ccccccc ChatController: OTHER's chat list updated.");
   }
 }

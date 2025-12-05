@@ -2,17 +2,17 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:dio/dio.dart';
 import '../sharedPrefrenceMethods/SharedPrefrenceMethods.dart';
+import '../models/UserModel.dart';
+import 'chatControler.dart';
 
 class ChatScreen extends StatefulWidget {
-  final String currentUserId;
-  final String otherUserId;
-  final String otherUserName;
+  final UserModel me;   // Current user
+  final UserModel other;
 
   const ChatScreen({
     super.key,
-    required this.currentUserId,
-    required this.otherUserId,
-    required this.otherUserName,
+    required this.me,
+    required this.other,
   });
 
   @override
@@ -23,6 +23,7 @@ class _ChatScreenState extends State<ChatScreen> {
   final TextEditingController _messageController = TextEditingController();
   final SharedPreferenceMethods _prefs = SharedPreferenceMethods();
   final Dio _dio = Dio();
+  final ChatController _chatController = ChatController();
 
   late String userLanguage = "en-US";
   late String chatRoomId;
@@ -30,12 +31,8 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   void initState() {
     super.initState();
-    chatRoomId = getChatRoomId(widget.currentUserId, widget.otherUserId);
+    chatRoomId = _chatController.getChatId(widget.me.id!, widget.other.id!);
     _loadUserLanguage();
-  }
-
-  String getChatRoomId(String id1, String id2) {
-    return id1.compareTo(id2) < 0 ? "${id1}_$id2" : "${id2}_$id1";
   }
 
   Future<void> _loadUserLanguage() async {
@@ -48,30 +45,26 @@ class _ChatScreenState extends State<ChatScreen> {
     final text = _messageController.text.trim();
     if (text.isEmpty) return;
 
-    final messageRef = FirebaseFirestore.instance
-        .collection("chats")
-        .doc(chatRoomId)
-        .collection("messages");
-
-    await messageRef.add({
-      "senderId": widget.currentUserId,
-      "message": text,
-      "timestamp": FieldValue.serverTimestamp(),
-      "translatedCache": {},
-    });
+    await _chatController.sendMessage(
+      me: widget.me,
+      other: widget.other,
+      message: text,
+    );
 
     _messageController.clear();
   }
 
-  // ---------------- TRANSLATE MESSAGE FIRST ----------------
+  // ---------------- TRANSLATE ----------------
   Future<void> translateMessage(
-      String original, DocumentReference ref, Map<String, dynamic> cache) async {
+      String original,
+      DocumentReference ref,
+      Map<String, dynamic> cache,
+      ) async {
     if (cache.containsKey(userLanguage)) return;
 
     try {
       final apiKey = "ap2_0dc5e861-dcd6-4cf1-a450-5da08a7fdfa8";
-
-      final response = await _dio.post(
+      final res = await _dio.post(
         "https://api.murf.ai/v1/text/translate",
         options: Options(headers: {
           "api-key": apiKey,
@@ -84,13 +77,50 @@ class _ChatScreenState extends State<ChatScreen> {
       );
 
       final translated =
-          response.data['translations'][0]['translated_text'] ?? original;
+          res.data["translations"][0]["translated_text"] ?? original;
 
       cache[userLanguage] = translated;
       await ref.update({"translatedCache": cache});
+      setState(() {}); // trigger rebuild to show translation immediately
     } catch (e) {
-      debugPrint("Translation error: $e");
+      print("ChatScreen: translation error => $e");
     }
+  }
+
+  // ---------------- RECEIVED MESSAGE WIDGET ----------------
+  Widget _buildReceivedMessage(Map<String, dynamic> data, DocumentReference ref) {
+    final original = data["message"] ?? "";
+    final cache = Map<String, dynamic>.from(data["translatedCache"] ?? {});
+
+    if (cache.containsKey(userLanguage)) {
+      return _otherMessage(cache[userLanguage]!);
+    }
+
+    translateMessage(original, ref, cache);
+
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Container(
+        margin: const EdgeInsets.all(8),
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: Colors.grey[700],
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: const [
+            SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white70),
+            ),
+            SizedBox(width: 8),
+            Text("Translating...", style: TextStyle(color: Colors.white70)),
+          ],
+        ),
+      ),
+    );
   }
 
   @override
@@ -103,7 +133,30 @@ class _ChatScreenState extends State<ChatScreen> {
         ),
       ),
       child: Scaffold(
-        appBar: AppBar(title: Text(widget.otherUserName)),
+        appBar: AppBar(
+          title: Row(mainAxisAlignment: MainAxisAlignment.start,
+            children: [
+              CircleAvatar(
+                backgroundImage: (widget.other.profileImage != null &&
+                    widget.other.profileImage!.isNotEmpty)
+                    ? NetworkImage(widget.other.profileImage!)
+                    : null,
+                child: (widget.other.profileImage == null ||
+                    widget.other.profileImage!.isEmpty)
+                    ? const Icon(Icons.person)
+                    : null,
+              ),
+              const SizedBox(width: 20),
+              Expanded(
+                child: Text(
+                  widget.other.name ?? "Chat",
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
+        ),
+
         body: Column(
           children: [
             Expanded(
@@ -112,63 +165,49 @@ class _ChatScreenState extends State<ChatScreen> {
                     .collection("chats")
                     .doc(chatRoomId)
                     .collection("messages")
-                    .orderBy("timestamp", descending: false)
+                    .orderBy("timestamp", descending: true)
                     .snapshots(),
                 builder: (context, snapshot) {
-                  if (!snapshot.hasData) return const SizedBox();
+                  if (!snapshot.hasData) {
+                    return const Center(child: CircularProgressIndicator());
+                  }
 
                   final docs = snapshot.data!.docs;
+                  if (docs.isEmpty) {
+                    return const Center(
+                      child: Text("Say Hi!", style: TextStyle(color: Colors.white54)),
+                    );
+                  }
 
                   return ListView.builder(
+                    reverse: true,
                     itemCount: docs.length,
                     itemBuilder: (context, index) {
                       final doc = docs[index];
                       final data = doc.data() as Map<String, dynamic>;
+                      final bool isMe = data["senderId"] == widget.me.id;
 
-                      final original = data["message"] ?? "";
-                      final cache =
-                      Map<String, dynamic>.from(data["translatedCache"] ?? {});
-                      final isMe =
-                          data["senderId"] == widget.currentUserId;
+                      if (isMe) return _myMessage(data["message"] ?? "");
 
-                      // ------------------ MY MESSAGE ------------------
-                      if (isMe) {
-                        return _myMessage(original);
-                      }
-
-                      // ------------------ RECEIVED MESSAGE ------------------
-
-                      // translated text if exists
-                      String translated = cache[userLanguage] ?? "";
-
-                      // if translation does not exist → translate first
-                      if (!cache.containsKey(userLanguage)) {
-                        translateMessage(original, doc.reference, cache);
-                        return const SizedBox(height: 0); // DO NOT SHOW ORIGINAL
-                      }
-
-                      // direct translated message show
-                      return _otherMessage(translated);
+                      return _buildReceivedMessage(data, doc.reference);
                     },
                   );
                 },
               ),
             ),
-
-            _buildMessageInput(),
+            _inputField(),
           ],
         ),
       ),
     );
   }
 
-  // ---------------- MESSAGE UI MOCKS ----------------
-
+  // ---------------- MESSAGE UI ----------------
   Widget _myMessage(String msg) {
     return Align(
       alignment: Alignment.centerRight,
       child: Container(
-        margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        margin: const EdgeInsets.all(8),
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
           color: Colors.purple,
@@ -183,7 +222,7 @@ class _ChatScreenState extends State<ChatScreen> {
     return Align(
       alignment: Alignment.centerLeft,
       child: Container(
-        margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        margin: const EdgeInsets.all(8),
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
           color: Colors.grey[700],
@@ -195,29 +234,36 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   // ---------------- INPUT FIELD ----------------
+  Widget _inputField() {
+    return Padding(
+      padding:  EdgeInsets.symmetric(vertical: 8.0),
+      child: Container(
+        decoration: BoxDecoration(
+          color: Colors.white12,
+          border: Border.all(color: Colors.purple.shade300),
+          borderRadius: BorderRadius.circular(12),
+        ),
 
-  Widget _buildMessageInput() {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      color: Colors.black12,
-      child: Row(
-        children: [
-          Expanded(
-            child: TextField(
-              controller: _messageController,
-              style: const TextStyle(color: Colors.white),
-              decoration: const InputDecoration(
-                hintText: "Type a message",
-                hintStyle: TextStyle(color: Colors.white54),
-                border: InputBorder.none,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        child: Row(
+          children: [
+            Expanded(
+              child: TextField(
+                controller: _messageController,
+                style: const TextStyle(color: Colors.white),
+                decoration: const InputDecoration(
+                  hintText: "Type a message",
+                  hintStyle: TextStyle(color: Colors.white54),
+                  border: InputBorder.none,
+                ),
               ),
             ),
-          ),
-          IconButton(
-            onPressed: _sendMessage,
-            icon: const Icon(Icons.send, color: Colors.purple),
-          )
-        ],
+            IconButton(
+              icon: const Icon(Icons.send, color: Colors.purple),
+              onPressed: _sendMessage,
+            ),
+          ],
+        ),
       ),
     );
   }

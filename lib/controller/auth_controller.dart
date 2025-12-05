@@ -10,7 +10,45 @@ class AuthController {
   final FirebaseFirestore firestore = FirebaseFirestore.instance;
   final SharedPreferenceMethods prefs = SharedPreferenceMethods();
 
-  // ---------------- SIGNUP -----------------
+  // --------------------------------------------------------
+  // 🔥 LAST SEEN FORMATTER
+  // --------------------------------------------------------
+  String getLastSeenTime() {
+    final now = DateTime.now();
+    return "${now.hour.toString().padLeft(2, '0')}:"
+        "${now.minute.toString().padLeft(2, '0')}  "
+        "${now.day}/${now.month}/${now.year}";
+  }
+
+  // --------------------------------------------------------
+  // 🔵 USER ONLINE
+  // --------------------------------------------------------
+  Future<void> setUserOnline() async {
+    if (auth.currentUser == null) return;
+
+    await firestore.collection("users").doc(auth.currentUser!.uid).update({
+      "status": "online",
+      "lastOnlineStatus": "Online"
+    });
+  }
+
+  // --------------------------------------------------------
+  // 🔴 USER OFFLINE + LAST SEEN UPDATE
+  // --------------------------------------------------------
+  Future<void> setUserOffline() async {
+    if (auth.currentUser == null) return;
+
+    String lastSeen = getLastSeenTime();
+
+    await firestore.collection("users").doc(auth.currentUser!.uid).update({
+      "status": "offline",
+      "lastOnlineStatus": "Last seen at $lastSeen"
+    });
+  }
+
+  // --------------------------------------------------------
+  // 🔐 SIGNUP
+  // --------------------------------------------------------
   Future<String?> signup(
       BuildContext context,
       String name,
@@ -20,7 +58,8 @@ class AuthController {
       String language,
       ) async {
     try {
-      UserCredential userCredential = await auth.createUserWithEmailAndPassword(
+      UserCredential userCredential =
+      await auth.createUserWithEmailAndPassword(
         email: email.trim(),
         password: password.trim(),
       );
@@ -31,7 +70,6 @@ class AuthController {
       String uid = user.uid;
       await user.updateDisplayName(name);
 
-      // Create UserModel with language
       UserModel userModel = UserModel(
         id: uid,
         name: name,
@@ -39,11 +77,13 @@ class AuthController {
         profileImage: "",
         mobileNumber: mobile,
         language: language,
+        status: "online",
+        lastOnlineStatus: "Online",
       );
 
       await firestore.collection("users").doc(uid).set(userModel.toJson());
 
-      // Save in SharedPreferences
+      // LOCAL SAVE
       await prefs.saveUserLogin(true);
       await prefs.saveUserUid(uid);
       await prefs.saveUserName(name);
@@ -51,6 +91,9 @@ class AuthController {
       await prefs.saveUserMobile(mobile);
       await prefs.saveUserLanguage(language);
 
+      // Mark Online
+      await setUserOnline();
+
       if (context.mounted) {
         Navigator.pushReplacementNamed(context, "/home");
       }
@@ -58,86 +101,119 @@ class AuthController {
       return null;
     } catch (e) {
       if (context.mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text("Signup failed: $e")));
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text("Signup failed: $e")));
       }
       return "$e";
     }
   }
 
-  // ---------------- LOGIN -----------------
-  Future<String?> login(BuildContext context, String email, String password) async {
+  // --------------------------------------------------------
+  // 🔐 LOGIN
+  // --------------------------------------------------------
+  Future<String?> login(
+      BuildContext context, String email, String password) async {
     try {
-      print("Login started with $email");
-
-      // Firebase Auth Login
-      UserCredential userCredential = await auth.signInWithEmailAndPassword(
+      UserCredential userCredential =
+      await auth.signInWithEmailAndPassword(
         email: email.trim(),
         password: password.trim(),
       );
-      String uid = userCredential.user!.uid;
-      print("Firebase user logged in: $uid");
 
-      // Fetch Firestore User
-      DocumentSnapshot snapshot = await firestore.collection("users").doc(uid).get();
+      String uid = userCredential.user!.uid;
+
+      DocumentSnapshot snapshot =
+      await firestore.collection("users").doc(uid).get();
+
+      // If user does not exist → create new profile
       if (!snapshot.exists) {
-        // Create default user document if missing
         UserModel newUser = UserModel(
           id: uid,
           name: userCredential.user!.displayName ?? "Unknown",
           email: email,
           profileImage: "",
           mobileNumber: "",
-          language: "en-US", // default language
+          language: "en-US",
+          status: "online",
+          lastOnlineStatus: "Online",
         );
 
         await firestore.collection("users").doc(uid).set(newUser.toJson());
         snapshot = await firestore.collection("users").doc(uid).get();
-        print("Firestore user created during login");
       }
 
-      UserModel userModel = UserModel.fromJson(snapshot.data() as Map<String, dynamic>);
-      print("Firestore user loaded: ${userModel.name}");
-      String savedLanguage="";
-      // Save Local Storage including language
+      UserModel userModel =
+      UserModel.fromJson(snapshot.data() as Map<String, dynamic>);
+
+      // SAVE LOCAL
       await prefs.saveUserLogin(true);
       await prefs.saveUserUid(userModel.id ?? "");
       await prefs.saveUserName(userModel.name ?? "");
       await prefs.saveUserEmail(userModel.email ?? "");
       await prefs.saveUserMobile(userModel.mobileNumber ?? "");
       await prefs.saveUserLanguage(userModel.language ?? "en-US");
-       savedLanguage = (await prefs.getUserLanguage())!;
-      print("✅ Login Language saved in SharedPreferences: $savedLanguage");// ✅ Save language
-      print("Login data saved to SharedPreferences");
-      print(" ssssssss Login data saved to SharedPreferences  ${ prefs.getUserLanguage()}");
 
-      // Navigate
+      // Mark Online
+      await setUserOnline();
+
       if (context.mounted) {
         Navigator.pushReplacementNamed(context, "/home");
       }
 
       return null;
     } catch (e) {
-      print("Login Error: $e");
       if (context.mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text("Login failed: $e")));
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text("Login failed: $e")));
       }
       return "$e";
     }
   }
 
-  // ---------------- LOGOUT -----------------
+  // --------------------------------------------------------
+  // 🔐 LOGOUT
+  // --------------------------------------------------------
   Future<void> logout(BuildContext context) async {
     try {
-      await auth.signOut();
-      await prefs.clearUserData();
+      print("🔹 Logout started");
 
-      if (context.mounted) {
-        Navigator.pushNamedAndRemoveUntil(context, "/login", (route) => false);
+      // 1️⃣ Set offline + last seen
+      if (auth.currentUser != null) {
+        await setUserOffline();
+        print("🔹 Set offline done");
       }
+
+      // 2️⃣ Firebase sign out
+      await auth.signOut();
+      print("🔹 Firebase signOut done");
+
+      // 3️⃣ Clear local prefs
+      await prefs.clearUserData();
+      print("🔹 Prefs cleared");
+
+      // 4️⃣ Navigate safely
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (context.mounted) {
+          Navigator.pushNamedAndRemoveUntil(context, "/login", (route) => false);
+          print("🔹 Navigation to login done");
+        }
+      });
     } catch (e) {
       print("Logout Error: $e");
+    }
+  }
+
+
+
+
+  // --------------------------------------------------------
+  // 🟡 APP CLOSE/BACKGROUND  → AUTO LAST SEEN UPDATE
+  // --------------------------------------------------------
+  Future<void> handleAppLifecycle(AppLifecycleState state) async {
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.detached ||
+        state == AppLifecycleState.inactive) {
+      await setUserOffline();
     }
   }
 }

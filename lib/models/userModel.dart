@@ -5,9 +5,9 @@ class UserModel {
   String? profileImage;
   String? mobileNumber;
   String? about;
-  String? status;
-  String? lastOnlineStatus;
-  String? language; // 🔹 Added language
+  String? status;              // online / offline
+  String? lastOnlineStatus;    // "2 min ago"
+  String? language;
 
   UserModel({
     this.id,
@@ -18,10 +18,11 @@ class UserModel {
     this.about,
     this.status,
     this.lastOnlineStatus,
-    this.language, // 🔹 Added language
+    this.language,
   });
 
   Map<String, dynamic> toJson() {
+    print("uuuuuuu UserModel.toJson called for ID: ${id ?? 'NULL'}");
     return {
       "id": id ?? "",
       "name": name ?? "",
@@ -29,23 +30,24 @@ class UserModel {
       "profileImage": profileImage ?? "",
       "mobileNumber": mobileNumber ?? "",
       "about": about ?? "",
-      "status": status ?? "",
+      "status": status ?? "offline",
       "lastOnlineStatus": lastOnlineStatus ?? "",
-      "language": language ?? "", // 🔹 Added language
+      "language": language ?? "",
     };
   }
 
   factory UserModel.fromJson(Map<String, dynamic> json) {
+    print("uuuuuuu UserModel.fromJson called for ID: ${json["id"] ?? 'NULL'}");
     return UserModel(
-      id: json["id"],
-      name: json["name"],
-      email: json["email"],
-      profileImage: json["profileImage"],
-      mobileNumber: json["mobileNumber"],
-      about: json["about"],
-      status: json["status"],
-      lastOnlineStatus: json["lastOnlineStatus"],
-      language: json["language"], // 🔹 Added language
+      id: json["id"] ?? "",
+      name: json["name"] ?? "",
+      email: json["email"] ?? "",
+      profileImage: json["profileImage"] ?? "",
+      mobileNumber: json["mobileNumber"] ?? "",
+      about: json["about"] ?? "",
+      status: json["status"] ?? "offline",
+      lastOnlineStatus: json["lastOnlineStatus"] ?? "",
+      language: json["language"] ?? "",
     );
   }
 }
