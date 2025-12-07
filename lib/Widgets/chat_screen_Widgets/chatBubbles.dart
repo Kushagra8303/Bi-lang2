@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
-
+//////////////////////////////////////////////////
+////////////////////////////////////////////////
+/// No use of this code
 class MessageBubble extends StatelessWidget {
   final String message;
   final String time;

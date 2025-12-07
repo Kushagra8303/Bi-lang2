@@ -123,7 +123,8 @@ class _LoginScreenState extends State<LoginScreen> {
                     style: TextStyle(color: Colors.grey)),
                 TextButton(
                   onPressed: () {
-                    Navigator.push(
+
+                    Navigator.pushReplacement(
                       context,
                       MaterialPageRoute(builder: (_) => const SignUpScreen()),
                     );
